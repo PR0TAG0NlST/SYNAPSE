@@ -1955,7 +1955,7 @@ JSON Output: The response MUST be a valid JSON array of objects. Each object mus
             `;
 
             try {
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${geminiApiKey}`;
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2507,7 +2507,7 @@ async function createUserProfile(user, username) {
         async function getAIResponse(prompt) {
             addBotLoader();
             try {
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${geminiApiKey}`;
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
                 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
@@ -2565,7 +2565,7 @@ async function createUserProfile(user, username) {
             `;
 
             try {
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${geminiApiKey}`;
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
                 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
@@ -2614,7 +2614,7 @@ async function createUserProfile(user, username) {
             const prompt = `Based on the following flashcards, generate a concise, one-sentence summary for the deck that would be appealing to other students:\n\n${cardContent}`;
 
             try {
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${geminiApiKey}`;
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2679,7 +2679,7 @@ async function fileToGenerativePart(file) {
                 const filePart = await fileToGenerativePart(file);
 
                 // 2. Call the Gemini API with both text prompt and file data
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${geminiApiKey}`;
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
                 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
@@ -4101,5 +4101,6 @@ function renderQuizModal(deck) { // Renamed from renderStudySessionView for clar
     </script>
 </body>
 </html>
+
 
 
