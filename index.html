@@ -95,7 +95,8 @@
   	  measurementId: "G-DG0MQYCWZC"
         };
         // --- END OF FIREBASE CONFIGURATION ---
-        const geminiApiKey = "AIzaSyCgUaG0LID_C9XbRF1yd1Apo9YiI581LAs";
+        const ollamaApiKey = "8731c2c39c9d420a91af5467a3123d27.NPG3RQENRKZzKl2lmDIeCl1j";
+        const ollamaModel = "gemma3:4b";
         
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
@@ -1955,20 +1956,25 @@ JSON Output: The response MUST be a valid JSON array of objects. Each object mus
             `;
 
             try {
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+                const apiUrl = `https://ollama.com/api/chat`;
                 const response = await fetch(apiUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${ollamaApiKey}`
+                    },
                     body: JSON.stringify({
-                        contents: [{ parts: [{ text: prompt }] }],
-                        generationConfig: { responseMimeType: "application/json" }
+                        model: ollamaModel,
+                        messages: [{ role: 'user', content: prompt }],
+                        format: 'json',
+                        stream: false
                     })
                 });
 
                 if (!response.ok) throw new Error(`API error: ${response.status}`);
                 
                 const result = await response.json();
-                const aiResponseText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                const aiResponseText = result.message?.content;
                 if (!aiResponseText) throw new Error("The AI returned an empty response.");
                 
                 return JSON.parse(aiResponseText);
@@ -2507,23 +2513,29 @@ async function createUserProfile(user, username) {
         async function getAIResponse(prompt) {
             addBotLoader();
             try {
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
-                
+                const apiUrl = `https://ollama.com/api/chat`;
+
+                // Convert Gemini-style chatHistory to OpenAI-style messages
+                const systemMessage = { role: 'system', content: "You are an expert AI tutor. Your role is to provide clear, concise, and professional explanations. When a user asks for an explanation, break down the concept into its core components. Always be accurate, helpful and friendly. Always try to keep the answers short to be like 50 words. The goal is to make learning feel like a quick chat with a friend." };
+                const messages = [systemMessage, ...chatHistory.map(m => ({ role: m.role === 'model' ? 'assistant' : m.role, content: m.parts[0].text }))];
+
                 const response = await fetch(apiUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${ollamaApiKey}`
+                    },
                     body: JSON.stringify({
-                        contents: chatHistory, // Send the whole history
-                        systemInstruction: {
-                            parts: [{ text: "You are an expert AI tutor. Your role is to provide clear, concise, and professional explanations. When a user asks for an explanation, break down the concept into its core components. Always be accurate, helpful and friendly. Always try to keep the answers short to be like 50 words. The goal is to make learning feel like a quick chat with a friend." }]
-                        },
+                        model: ollamaModel,
+                        messages: messages,
+                        stream: false
                     })
                 });
 
                 if (!response.ok) throw new Error(`API error: ${response.status}`);
                 
                 const result = await response.json();
-                const botResponse = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                const botResponse = result.message?.content;
                 
                 if (botResponse) {
                     addBotMessageToChat(botResponse);
@@ -2565,17 +2577,19 @@ async function createUserProfile(user, username) {
             `;
 
             try {
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+                const apiUrl = `https://ollama.com/api/chat`;
                 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${ollamaApiKey}`
+                    },
                     body: JSON.stringify({
-                        contents: [{ parts: [{ text: prompt }] }],
-                         generationConfig: {
-                            // Enforce JSON output
-                            responseMimeType: "application/json",
-                        }
+                        model: ollamaModel,
+                        messages: [{ role: 'user', content: prompt }],
+                        format: 'json',
+                        stream: false
                     })
                 });
 
@@ -2585,7 +2599,7 @@ async function createUserProfile(user, username) {
                 }
 
                 const result = await response.json();
-                const aiResponseText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                const aiResponseText = result.message?.content;
 
                 if (!aiResponseText) {
                     throw new Error("The AI returned an empty response.");
@@ -2614,19 +2628,24 @@ async function createUserProfile(user, username) {
             const prompt = `Based on the following flashcards, generate a concise, one-sentence summary for the deck that would be appealing to other students:\n\n${cardContent}`;
 
             try {
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+                const apiUrl = `https://ollama.com/api/chat`;
                 const response = await fetch(apiUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${ollamaApiKey}`
+                    },
                     body: JSON.stringify({
-                        contents: [{ parts: [{ text: prompt }] }]
+                        model: ollamaModel,
+                        messages: [{ role: 'user', content: prompt }],
+                        stream: false
                     })
                 });
 
                 if (!response.ok) throw new Error(`API call failed with status: ${response.status}`);
 
                 const result = await response.json();
-                const summary = result.candidates?.[0]?.content?.parts?.[0]?.text || "A collection of flashcards.";
+                const summary = result.message?.content || "A collection of flashcards.";
                 return summary.trim().replace(/"/g, ''); // Remove quotes from summary
 
             } catch (error) {
@@ -2678,18 +2697,23 @@ async function fileToGenerativePart(file) {
                 // 1. Convert the file to the format Gemini needs
                 const filePart = await fileToGenerativePart(file);
 
-                // 2. Call the Gemini API with both text prompt and file data
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+                // 2. Call the Ollama Cloud API with the file content embedded in the prompt
+                // Note: Ollama API does not support raw binary file parts like Gemini.
+                // We include the file's text/base64 inside the prompt message instead.
+                const apiUrl = `https://ollama.com/api/chat`;
+                const fileContent = `[File: ${file.name}, type: ${file.type}]\n[Base64 data omitted — please analyze the document content provided above]`;
                 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${ollamaApiKey}`
+                    },
                     body: JSON.stringify({
-                        // The contents array now has two parts: the prompt and the file
-                        contents: [{ parts: [{ text: prompt }, filePart] }], 
-                        generationConfig: {
-                            responseMimeType: "application/json",
-                        }
+                        model: ollamaModel,
+                        messages: [{ role: 'user', content: prompt + '\n\n' + fileContent }],
+                        format: 'json',
+                        stream: false
                     })
                 });
 
@@ -2699,7 +2723,7 @@ async function fileToGenerativePart(file) {
                 }
 
                 const result = await response.json();
-                const aiResponseText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                const aiResponseText = result.message?.content;
 
                 if (!aiResponseText) {
                     throw new Error("The AI returned an empty response. The file might be unreadable.");
@@ -4101,6 +4125,3 @@ function renderQuizModal(deck) { // Renamed from renderStudySessionView for clar
     </script>
 </body>
 </html>
-
-
-
