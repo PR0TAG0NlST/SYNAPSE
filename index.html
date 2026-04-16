@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Synapse</title>
-    <link rel="icon" type="image/png" href="favicon.png"> <script                    src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>"> <script src="https://cdn.tailwindcss.com"></script>
 </head>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
@@ -1956,7 +1956,7 @@ JSON Output: The response MUST be a valid JSON array of objects. Each object mus
             `;
 
             try {
-                const apiUrl = `https://ollama.com/api/chat`;
+                const apiUrl = `https://api.ollama.ai/api/chat`;
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: {
@@ -2002,20 +2002,20 @@ JSON Output: The response MUST be a valid JSON array of objects. Each object mus
                 content.innerHTML = `
                     <div class="max-w-2xl mx-auto">
                         <div class="flex justify-between items-center mb-4">
-                            <p class="text-sm text-gray-500">Question ${currentQuestionIndex + 1} of ${quizQuestions.length}</p>
-                            <p class="text-sm font-bold">Score: ${score}</p>
+                            <p class="text-sm text-gray-500 dark:text-gray-400">Question ${currentQuestionIndex + 1} of ${quizQuestions.length}</p>
+                            <p class="text-sm font-bold text-gray-900 dark:text-white">Score: ${score}</p>
                         </div>
                         <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg">
-                            <p class="text-lg font-medium mb-6">${q.question}</p>
+                            <p class="text-lg font-medium mb-6 text-gray-900 dark:text-white">${q.question}</p>
                             <div id="quiz-options" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 ${q.options.map(option => `
-                                    <button class="quiz-option p-4 border dark:border-gray-600 rounded-lg text-left hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <button class="quiz-option p-4 border dark:border-gray-600 rounded-lg text-left hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-white transition-colors">
                                         ${option}
                                     </button>
                                 `).join('')}
                             </div>
                             <div id="quiz-feedback" class="mt-6 flex justify-center items-center">
-                                <button id="skip-question-btn" class="px-6 py-2 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500">Skip</button>
+                                <button id="skip-question-btn" class="px-6 py-2 bg-gray-200 dark:bg-gray-600 text-gray-900 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500">Skip</button>
                             </div>
                         </div>
                     </div>
@@ -2482,7 +2482,7 @@ async function createUserProfile(user, username) {
                 const formattedMessage = formatAIResponse(message);
                 const messageEl = document.createElement('div');
                 messageEl.className = 'flex justify-start';
-                messageEl.innerHTML = `<div class="bg-gray-200 dark:bg-gray-600 p-3 rounded-lg max-w-xs text-sm">${formattedMessage}</div>`;
+                messageEl.innerHTML = `<div class="bg-gray-200 dark:bg-gray-600 p-3 rounded-lg max-w-xs text-sm text-gray-900 dark:text-white">${formattedMessage}</div>`;
                 chatMessages.appendChild(messageEl);
                 chatMessages.scrollTop = chatMessages.scrollHeight;
             }
@@ -2513,7 +2513,7 @@ async function createUserProfile(user, username) {
         async function getAIResponse(prompt) {
             addBotLoader();
             try {
-                const apiUrl = `https://ollama.com/api/chat`;
+                const apiUrl = `https://api.ollama.ai/api/chat`;
 
                 // Convert Gemini-style chatHistory to OpenAI-style messages
                 const systemMessage = { role: 'system', content: "You are an expert AI tutor. Your role is to provide clear, concise, and professional explanations. When a user asks for an explanation, break down the concept into its core components. Always be accurate, helpful and friendly. Always try to keep the answers short to be like 50 words. The goal is to make learning feel like a quick chat with a friend." };
@@ -2577,7 +2577,7 @@ async function createUserProfile(user, username) {
             `;
 
             try {
-                const apiUrl = `https://ollama.com/api/chat`;
+                const apiUrl = `https://api.ollama.ai/api/chat`;
                 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
@@ -2628,7 +2628,7 @@ async function createUserProfile(user, username) {
             const prompt = `Based on the following flashcards, generate a concise, one-sentence summary for the deck that would be appealing to other students:\n\n${cardContent}`;
 
             try {
-                const apiUrl = `https://ollama.com/api/chat`;
+                const apiUrl = `https://api.ollama.ai/api/chat`;
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: {
@@ -2700,7 +2700,7 @@ async function fileToGenerativePart(file) {
                 // 2. Call the Ollama Cloud API with the file content embedded in the prompt
                 // Note: Ollama API does not support raw binary file parts like Gemini.
                 // We include the file's text/base64 inside the prompt message instead.
-                const apiUrl = `https://ollama.com/api/chat`;
+                const apiUrl = `https://api.ollama.ai/api/chat`;
                 const fileContent = `[File: ${file.name}, type: ${file.type}]\n[Base64 data omitted — please analyze the document content provided above]`;
                 
                 const response = await fetch(apiUrl, {
