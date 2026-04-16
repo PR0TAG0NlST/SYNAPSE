@@ -1974,9 +1974,11 @@ JSON Output: The response MUST be a valid JSON array of objects. Each object mus
                 if (!response.ok) throw new Error(`API error: ${response.status}`);
                 
                 const result = await response.json();
-                const aiResponseText = result.message?.content;
+                let aiResponseText = result.message?.content;
                 if (!aiResponseText) throw new Error("The AI returned an empty response.");
                 
+                // Clean up possible markdown formatting before parsing
+                aiResponseText = aiResponseText.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
                 return JSON.parse(aiResponseText);
 
             } catch (error) {
@@ -2599,12 +2601,14 @@ async function createUserProfile(user, username) {
                 }
 
                 const result = await response.json();
-                const aiResponseText = result.message?.content;
+                let aiResponseText = result.message?.content;
 
                 if (!aiResponseText) {
                     throw new Error("The AI returned an empty response.");
                 }
                 
+                // Clean up possible markdown formatting before parsing
+                aiResponseText = aiResponseText.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
                 const newCards = JSON.parse(aiResponseText);
 
                 if (Array.isArray(newCards) && newCards.length > 0) {
@@ -2700,7 +2704,7 @@ async function fileToGenerativePart(file) {
                 // 2. Call the Ollama Cloud API with the file content embedded in the prompt
                 // Note: Ollama API does not support raw binary file parts like Gemini.
                 // We include the file's text/base64 inside the prompt message instead.
-                const apiUrl = `https://api.ollama.ai/api/chat`;
+                const apiUrl = `/api/chat`;
                 const fileContent = `[File: ${file.name}, type: ${file.type}]\n[Base64 data omitted — please analyze the document content provided above]`;
                 
                 const response = await fetch(apiUrl, {
@@ -2723,12 +2727,14 @@ async function fileToGenerativePart(file) {
                 }
 
                 const result = await response.json();
-                const aiResponseText = result.message?.content;
+                let aiResponseText = result.message?.content;
 
                 if (!aiResponseText) {
                     throw new Error("The AI returned an empty response. The file might be unreadable.");
                 }
                 
+                // Clean up possible markdown formatting before parsing
+                aiResponseText = aiResponseText.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
                 const newCards = JSON.parse(aiResponseText);
 
                 if (Array.isArray(newCards) && newCards.length > 0) {
