@@ -940,8 +940,8 @@
                     <div id="main-header"><h1 class="text-xl font-semibold">My Decks</h1></div>
                     <div class="flex items-center space-x-4">
                         <button id="theme-toggle" type="button" class="text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-4 focus:ring-gray-200 dark:focus:ring-gray-700 rounded-lg text-sm p-2.5">
-                            <img id="theme-toggle-dark-icon" src="https://www.pngall.com/wp-content/uploads/2016/03/Moon-Vector-PNG.png" class="hidden w-5 h-5">
-                            <img id="theme-toggle-light-icon" src="https://icon-library.com/images/sun-icon-png/sun-icon-png-21.jpg" class="hidden w-5 h-5" style="filter: invert(87%) sepia(34%) saturate(1269%) hue-rotate(349deg) brightness(103%) contrast(102%);">
+                            <svg id="theme-toggle-dark-icon" class="hidden w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path></svg>
+                            <svg id="theme-toggle-light-icon" class="hidden w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.707.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 5.05a1 1 0 010 1.414l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 0zM3 11a1 1 0 100-2H2a1 1 0 100 2h1z" fill-rule="evenodd" clip-rule="evenodd"></path></svg>
                         </button>
                     </div>
                 </header>
@@ -1934,9 +1934,10 @@ async function generateQuizWithAI(deck) {
                 Generate a multiple-choice quiz based on the text I provide below.
 You must follow these specific rules for the quiz's design:
 
+Number of Questions: Generate exactly ${questionCount} questions.
 Concise Options: Make all answer options (both correct and incorrect) as concise and least detailed as possible.
 Answer Length: Avoid making the correct answer consistently the longest option. The correct answer should often be shorter than or roughly equal in length to the incorrect options (distractors).
-Randomized Position: Randomly mix the position of the correct answer (A, B, C, D) for each question.
+Randomized Position: The correct answer MUST appear in a different position (index 0, 1, 2, or 3) for EACH question. Never put the correct answer in the same slot for consecutive questions.
 JSON Output: The response MUST be a valid JSON array of objects. Each object must have keys "question", "options" (an array of 4 strings), and "correctAnswer" (a string matching one of the options). Do NOT include explanations or markdown.
 
 
@@ -2001,6 +2002,11 @@ JSON Output: The response MUST be a valid JSON array of objects. Each object mus
                 }
 
                 const q = quizQuestions[currentQuestionIndex];
+
+                // Always shuffle options client-side so the correct answer
+                // is never predictably in the same position regardless of what the AI returns.
+                const shuffledOptions = [...q.options].sort(() => Math.random() - 0.5);
+
                 content.innerHTML = `
                     <div class="max-w-2xl mx-auto">
                         <div class="flex justify-between items-center mb-4">
@@ -2010,7 +2016,7 @@ JSON Output: The response MUST be a valid JSON array of objects. Each object mus
                         <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg">
                             <p class="text-lg font-medium mb-6 text-gray-900 dark:text-white">${q.question}</p>
                             <div id="quiz-options" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                ${q.options.map(option => `
+                                ${shuffledOptions.map(option => `
                                     <button class="quiz-option p-4 border dark:border-gray-600 rounded-lg text-left hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-white transition-colors">
                                         ${option}
                                     </button>
