@@ -1956,7 +1956,7 @@ JSON Output: The response MUST be a valid JSON array of objects. Each object mus
             `;
 
             try {
-                const apiUrl = `https://api.ollama.ai/api/chat`;
+                const apiUrl = `https://ollama.com/api/chat`;
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: {
@@ -2513,7 +2513,7 @@ async function createUserProfile(user, username) {
         async function getAIResponse(prompt) {
             addBotLoader();
             try {
-                const apiUrl = `https://api.ollama.ai/api/chat`;
+                const apiUrl = `https://ollama.com/api/chat`;
 
                 // Convert Gemini-style chatHistory to OpenAI-style messages
                 const systemMessage = { role: 'system', content: "You are an expert AI tutor. Your role is to provide clear, concise, and professional explanations. When a user asks for an explanation, break down the concept into its core components. Always be accurate, helpful and friendly. Always try to keep the answers short to be like 50 words. The goal is to make learning feel like a quick chat with a friend." };
@@ -2577,7 +2577,7 @@ async function createUserProfile(user, username) {
             `;
 
             try {
-                const apiUrl = `https://api.ollama.ai/api/chat`;
+                const apiUrl = `https://ollama.com/api/chat`;
                 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
@@ -2628,7 +2628,7 @@ async function createUserProfile(user, username) {
             const prompt = `Based on the following flashcards, generate a concise, one-sentence summary for the deck that would be appealing to other students:\n\n${cardContent}`;
 
             try {
-                const apiUrl = `https://api.ollama.ai/api/chat`;
+                const apiUrl = `https://ollama.com/api/chat`;
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: {
