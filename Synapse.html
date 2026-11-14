@@ -111,6 +111,9 @@
         // Global variables
         let app, db, auth, storage, userId, userProfile;
         let allUserDecks = [];
+        let allDeckSubjects = []; // User's created subject folders for decks
+        let activeDeckSubject = null; // Currently selected subject (e.g. 'DSP' or null for top-level)
+        let deckViewMode = 'subjects'; // 'subjects' (folders) or 'all' (all decks)
         let progressSubjects = [];
         let progressChartInstance = null;
         let allPublicDecks = [];
@@ -269,19 +272,173 @@
             modal.querySelector('.modal-close-btn:not(h3 ~ .modal-close-btn)').style.display = 'none';
         }
 
-        function renderAddDeckModal() {
+        
+        // --- DECK SUBJECTS SYSTEM HELPERS ---
+        function getAllDeckSubjects() {
+            const subjectsSet = new Set();
+            allUserDecks.forEach(d => {
+                const s = (d.subject || '').trim();
+                if (s) subjectsSet.add(s);
+            });
+            allDeckSubjects.forEach(s => {
+                const name = (typeof s === 'string' ? s : s.name || '').trim();
+                if (name) subjectsSet.add(name);
+            });
+            return Array.from(subjectsSet).sort((a, b) => a.localeCompare(b));
+        }
+
+        async function saveDeckSubject(subjectName) {
+            if (!userId || !subjectName || !subjectName.trim()) return;
+            try {
+                const cleanName = subjectName.trim();
+                const exists = allDeckSubjects.some(s => (s.name || s) === cleanName);
+                if (!exists) {
+                    const subjectsCol = collection(db, `/artifacts/${appId}/users/${userId}/deck_subjects`);
+                    await addDoc(subjectsCol, { name: cleanName, createdAt: Date.now() });
+                }
+            } catch (e) {
+                console.error("Error saving deck subject:", e);
+            }
+        }
+
+        async function deleteDeckSubject(subjectName) {
+            if (!confirm(`Are you sure you want to delete the "${subjectName}" subject folder?\n\nDecks inside will NOT be deleted; they will simply be moved to General.`)) return;
+            try {
+                const batch = writeBatch(db);
+                const subjectDecks = allUserDecks.filter(d => (d.subject || '').trim() === subjectName);
+                subjectDecks.forEach(d => {
+                    const ref = doc(db, `/artifacts/${appId}/users/${userId}/decks`, d.id);
+                    batch.update(ref, { subject: '' });
+                });
+                const subjectsCol = collection(db, `/artifacts/${appId}/users/${userId}/deck_subjects`);
+                const q = query(subjectsCol, where("name", "==", subjectName));
+                const snap = await getDocs(q);
+                snap.forEach(d => batch.delete(d.ref));
+                await batch.commit();
+
+                if (activeDeckSubject === subjectName) {
+                    activeDeckSubject = null;
+                }
+                renderDecksView(allUserDecks);
+            } catch (e) {
+                console.error("Error deleting deck subject:", e);
+            }
+        }
+
+        async function renameDeckSubject(oldName, newName) {
+            if (!newName || !newName.trim() || newName.trim() === oldName) return;
+            try {
+                const cleanNew = newName.trim();
+                const batch = writeBatch(db);
+                const subjectDecks = allUserDecks.filter(d => (d.subject || '').trim() === oldName);
+                subjectDecks.forEach(d => {
+                    const ref = doc(db, `/artifacts/${appId}/users/${userId}/decks`, d.id);
+                    batch.update(ref, { subject: cleanNew });
+                });
+                const subjectsCol = collection(db, `/artifacts/${appId}/users/${userId}/deck_subjects`);
+                const q = query(subjectsCol, where("name", "==", oldName));
+                const snap = await getDocs(q);
+                snap.forEach(d => batch.update(d.ref, { name: cleanNew }));
+                await batch.commit();
+
+                if (activeDeckSubject === oldName) {
+                    activeDeckSubject = cleanNew;
+                }
+                renderDecksView(allUserDecks);
+            } catch (e) {
+                console.error("Error renaming deck subject:", e);
+            }
+        }
+
+        function renderCreateSubjectFolderModal() {
+            renderModal('create-subject-folder-modal', 'Create New Subject Folder', `
+                <form id="create-subject-folder-form" class="space-y-3">
+                    <div>
+                        <label for="new-subject-folder-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Subject Name</label>
+                        <input type="text" id="new-subject-folder-name" placeholder="e.g., DSP, Calculus, Operating Systems" required class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    </div>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">A subject folder groups multiple unit decks together (e.g. Unit 1, Unit 2, Unit 3).</p>
+                </form>`,
+            () => {
+                const name = document.getElementById('new-subject-folder-name').value.trim();
+                if (name) {
+                    saveDeckSubject(name);
+                    activeDeckSubject = name;
+                    renderDecksView(allUserDecks);
+                    document.getElementById('create-subject-folder-modal')?.remove();
+                }
+            }, 'Create Subject');
+        }
+
+        function renderRenameSubjectFolderModal(currentName) {
+            renderModal('rename-subject-folder-modal', `Rename "${currentName}"`, `
+                <form id="rename-subject-folder-form" class="space-y-3">
+                    <div>
+                        <label for="rename-subject-folder-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">New Subject Name</label>
+                        <input type="text" id="rename-subject-folder-name" value="${currentName.replace(/"/g, '&quot;')}" required class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    </div>
+                </form>`,
+            () => {
+                const newName = document.getElementById('rename-subject-folder-name').value.trim();
+                if (newName && newName !== currentName) {
+                    renameDeckSubject(currentName, newName);
+                    document.getElementById('rename-subject-folder-modal')?.remove();
+                }
+            }, 'Save');
+        }
+
+        function renderAddDeckModal(defaultSubject = null) {
+            const subjects = getAllDeckSubjects();
+            const currentSub = defaultSubject !== null ? defaultSubject : (activeDeckSubject || '');
+
+            const subjectOptions = subjects.map(s => 
+                `<option value="${s.replace(/"/g, '&quot;')}" ${s === currentSub ? 'selected' : ''}>📁 ${s}</option>`
+            ).join('');
+
             renderModal('add-deck-modal', 'Create New Deck', `
-                <form id="create-deck-form">
-                    <label for="deck-topic" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
-                    <input type="text" id="deck-topic" required class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                <form id="create-deck-form" class="space-y-4">
+                    <div>
+                        <label for="deck-topic" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Deck Name</label>
+                        <input type="text" id="deck-topic" required placeholder="e.g., Unit 1: Signals & Systems" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    </div>
+                    <div>
+                        <label for="deck-subject-select" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Subject Folder</label>
+                        <select id="deck-subject-select" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                            <option value="">-- No Subject (General) --</option>
+                            ${subjectOptions}
+                            <option value="__NEW__">+ Create New Subject Folder...</option>
+                        </select>
+                    </div>
+                    <div id="new-subject-input-container" class="hidden">
+                        <label for="new-subject-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">New Subject Name</label>
+                        <input type="text" id="new-subject-name" placeholder="e.g., DSP, Mathematics" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    </div>
                 </form>`, 
             () => {
-                const topic = document.getElementById('deck-topic').value;
+                const topic = document.getElementById('deck-topic').value.trim();
+                const select = document.getElementById('deck-subject-select');
+                let subject = select.value;
+                if (subject === '__NEW__') {
+                    subject = document.getElementById('new-subject-name').value.trim();
+                }
                 if (topic) {
-                    createDeck(topic);
+                    createDeck(topic, subject);
                     document.getElementById('add-deck-modal')?.remove();
                 }
             }, 'Create Deck');
+
+            const selectEl = document.getElementById('deck-subject-select');
+            const newContainer = document.getElementById('new-subject-input-container');
+            if (selectEl && newContainer) {
+                selectEl.addEventListener('change', () => {
+                    if (selectEl.value === '__NEW__') {
+                        newContainer.classList.remove('hidden');
+                        document.getElementById('new-subject-name')?.focus();
+                    } else {
+                        newContainer.classList.add('hidden');
+                    }
+                });
+            }
         }
 
         function renderAddSubjectModal() {
@@ -422,20 +579,58 @@
         }
         
         function renderRenameDeckModal(deckId, currentTopic) {
-            renderModal('rename-deck-modal', 'Rename Deck', `
-                <form id="rename-deck-form">
-                    <label for="deck-topic-rename" class="block text-sm font-medium text-gray-700 dark:text-gray-300">New Topic Name</label>
-                    <input type="text" id="deck-topic-rename" required class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value="${currentTopic}">
+            const deck = allUserDecks.find(d => d.id === deckId);
+            const currentSubject = (deck?.subject || '').trim();
+            const subjects = getAllDeckSubjects();
+
+            const subjectOptions = subjects.map(s => 
+                `<option value="${s.replace(/"/g, '&quot;')}" ${s === currentSubject ? 'selected' : ''}>📁 ${s}</option>`
+            ).join('');
+
+            renderModal('rename-deck-modal', 'Edit Deck', `
+                <form id="rename-deck-form" class="space-y-4">
+                    <div>
+                        <label for="deck-topic-rename" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Deck Name</label>
+                        <input type="text" id="deck-topic-rename" required class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value="${currentTopic.replace(/"/g, '&quot;')}">
+                    </div>
+                    <div>
+                        <label for="deck-subject-rename" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Subject Folder</label>
+                        <select id="deck-subject-rename" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                            <option value="" ${currentSubject === '' ? 'selected' : ''}>-- No Subject (General) --</option>
+                            ${subjectOptions}
+                            <option value="__NEW__">+ Create New Subject Folder...</option>
+                        </select>
+                    </div>
+                    <div id="rename-new-subject-container" class="hidden">
+                        <label for="rename-new-subject-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">New Subject Name</label>
+                        <input type="text" id="rename-new-subject-name" placeholder="e.g., DSP" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    </div>
                 </form>`,
             () => {
                 const newTopic = document.getElementById('deck-topic-rename').value.trim();
-                if (newTopic && newTopic !== currentTopic) {
-                    updateDeckTopic(deckId, newTopic);
-                    document.getElementById('rename-deck-modal')?.remove();
-                } else {
+                const select = document.getElementById('deck-subject-rename');
+                let newSubject = select.value;
+                if (newSubject === '__NEW__') {
+                    newSubject = document.getElementById('rename-new-subject-name').value.trim();
+                }
+                if (newTopic) {
+                    updateDeckTopic(deckId, newTopic, newSubject);
                     document.getElementById('rename-deck-modal')?.remove();
                 }
-            }, 'Rename Deck');
+            }, 'Save Changes');
+
+            const selectEl = document.getElementById('deck-subject-rename');
+            const newContainer = document.getElementById('rename-new-subject-container');
+            if (selectEl && newContainer) {
+                selectEl.addEventListener('change', () => {
+                    if (selectEl.value === '__NEW__') {
+                        newContainer.classList.remove('hidden');
+                        document.getElementById('rename-new-subject-name')?.focus();
+                    } else {
+                        newContainer.classList.add('hidden');
+                    }
+                });
+            }
         }
 
         function renderEditCardModal(deckId, cardIndex, card) {
@@ -1028,54 +1223,66 @@
     const libraryList = document.getElementById('library-list');
     if (!libraryList) return;
 
-    const sortedDecks = decks.sort((a, b) => a.topic.localeCompare(b.topic));
+    const searchLower = searchTerm.trim().toLowerCase();
+    const filteredDecks = searchLower
+        ? decks.filter(d => d.topic.toLowerCase().includes(searchLower) || (d.subject || '').toLowerCase().includes(searchLower))
+        : decks;
 
-    const decksHTML = sortedDecks.map(deck => {
-        const escapedTopic = deck.topic.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        let topicHTML;
-
-        if (!searchTerm.trim()) {
-    topicHTML = escapedTopic.replace(/ /g, '&nbsp;');
-} else {
-    let resultHTML = '';
-    let lastIndex = 0;
-    const lowerCaseTopic = escapedTopic.toLowerCase();
-    const lowerCaseSearch = searchTerm.toLowerCase();
-
-    let startIndex = lowerCaseTopic.indexOf(lowerCaseSearch);
-
-    while (startIndex !== -1) {
-        // Preserve spaces before the match
-        resultHTML += escapedTopic
-            .substring(lastIndex, startIndex)
-            .replace(/ /g, '&nbsp;');
-
-        // Highlighted part
-        resultHTML += `<strong class="font-bold">${escapedTopic.substring(startIndex, startIndex + searchTerm.length)}</strong>`;
-
-        lastIndex = startIndex + searchTerm.length;
-        startIndex = lowerCaseTopic.indexOf(lowerCaseSearch, lastIndex);
+    if (filteredDecks.length === 0) {
+        libraryList.innerHTML = `<p class="px-2 py-3 text-xs text-gray-400">No decks found</p>`;
+        return;
     }
 
-    // Preserve spaces after last match
-    resultHTML += escapedTopic.substring(lastIndex).replace(/ /g, '&nbsp;');
-    topicHTML = resultHTML;
-}  
+    // Group decks by subject
+    const groups = {};
+    filteredDecks.forEach(deck => {
+        const sub = (deck.subject || '').trim() || 'General';
+        if (!groups[sub]) groups[sub] = [];
+        groups[sub].push(deck);
+    });
+
+    const groupNames = Object.keys(groups).sort((a, b) => {
+        if (a === 'General') return 1;
+        if (b === 'General') return -1;
+        return a.localeCompare(b);
+    });
+
+    libraryList.innerHTML = groupNames.map(group => {
+        const groupDecks = groups[group].sort((a, b) => a.topic.localeCompare(b.topic));
         return `
-        <a href="#" class="flex items-center px-2 py-1 text-sm font-medium text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" data-id="${deck.id}">
-            ${topicHTML}
-        </a>
+            <div class="mb-3">
+                <div class="library-subject-header flex items-center justify-between px-2 py-1 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors" data-subject="${group}">
+                    <span class="truncate flex items-center gap-1.5">
+                        <span>📁</span>
+                        <span>${group}</span>
+                    </span>
+                    <span class="text-[10px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1.5 py-0.2 rounded-full font-semibold">${groupDecks.length}</span>
+                </div>
+                <div class="space-y-0.5 pl-2 mt-1 border-l-2 border-gray-200 dark:border-gray-700 ml-2">
+                    ${groupDecks.map(deck => `
+                        <a href="#" class="flex items-center justify-between px-2 py-1.5 rounded-md text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" data-id="${deck.id}">
+                            <span class="truncate">${deck.topic}</span>
+                            <span class="text-[10px] text-gray-400 font-medium ml-1 flex-shrink-0">${deck.cards ? deck.cards.length : 0}</span>
+                        </a>
+                    `).join('')}
+                </div>
+            </div>
         `;
     }).join('');
 
-    libraryList.innerHTML = decksHTML;
+    libraryList.querySelectorAll('.library-subject-header').forEach(header => {
+        header.addEventListener('click', () => {
+            const subject = header.dataset.subject;
+            activeDeckSubject = (subject === 'General' ? '' : subject);
+            renderDecksView(allUserDecks);
+        });
+    });
 }
-
 
         function renderDecksView(decks) {
             setActiveNav('nav-my-decks');
             const content = document.getElementById('app-content');
-            setHeader('My Decks');
+            
             const topicStyles = {
                 'Psychology': { color: 'bg-rose-300', icon: '🧠' },
                 'Biology': { color: 'bg-orange-400', icon: '📄' },
@@ -1087,62 +1294,347 @@
                 'Spanish': { color: 'bg-amber-400', icon: 'ℹ️' },
                 'History': { color: 'bg-stone-500', icon: '🏛️' },
                 'Math': { color: 'bg-sky-400', icon: '🧮' },
-                'Default': { color: 'bg-gray-400', icon: '📚' }
+                'Default': { color: 'bg-indigo-400', icon: '📚' }
             };
-            
             const getTopicStyle = (topic) => topicStyles[topic] || topicStyles['Default'];
 
-            if (decks.length === 0) {
-                 content.innerHTML = `
-                    <div class="text-center py-12">
-                        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" /></svg>
-                        <h3 class="mt-2 text-sm font-medium text-gray-900 dark:text-white">No decks</h3>
-                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Get started by creating a new deck.</p>
-                        <div class="mt-6">
-                            <button id="empty-add-deck-btn" type="button" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                                <svg class="-ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" /></svg>
-                                New Deck
+            // --- VIEW MODE 1: INSIDE A SPECIFIC SUBJECT FOLDER ---
+            if (activeDeckSubject !== null) {
+                const subjectName = activeDeckSubject;
+                setHeader(`📁 ${subjectName || 'General Decks'}`);
+                const subjectDecks = decks.filter(d => (d.subject || '').trim() === subjectName);
+                const totalCards = subjectDecks.reduce((sum, d) => sum + (d.cards ? d.cards.length : 0), 0);
+
+                let decksGridHTML = '';
+                if (subjectDecks.length === 0) {
+                    decksGridHTML = `
+                        <div class="text-center py-16 bg-white dark:bg-gray-800 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
+                            <div class="text-4xl mb-3">📁</div>
+                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">No decks in "${subjectName}" yet</h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-sm mx-auto">Add unit decks to this subject (e.g. Unit 1, Unit 2, Unit 3).</p>
+                            <button id="subject-inner-add-btn" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 shadow-sm transition">
+                                + Add First Deck
                             </button>
+                        </div>`;
+                } else {
+                    decksGridHTML = `
+                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                            ${subjectDecks.map(deck => {
+                                const style = getTopicStyle(deck.topic);
+                                const cardCount = deck.cards ? deck.cards.length : 0;
+                                const isPublic = deck.isPublic || false;
+                                return `
+                                <div class="deck-card bg-white dark:bg-gray-800 rounded-xl shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 overflow-hidden cursor-pointer transform hover:-translate-y-1 transition duration-200" data-id="${deck.id}">
+                                    <div class="p-5">
+                                        <div class="flex items-center justify-between mb-3">
+                                            <div class="flex items-center space-x-2.5 min-w-0">
+                                                <div class="w-9 h-9 rounded-lg ${style.color} flex items-center justify-center text-lg flex-shrink-0">${style.icon}</div>
+                                                <h3 class="text-base font-semibold text-gray-800 dark:text-white truncate" title="${deck.topic}">${deck.topic}</h3>
+                                            </div>
+                                            <div class="flex items-center flex-shrink-0 space-x-1">
+                                                <button class="rename-deck-btn text-gray-400 hover:text-blue-500 p-1" data-id="${deck.id}" data-topic="${deck.topic}" title="Rename / Move">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z"></path></svg>
+                                                </button>
+                                                <button class="delete-deck-btn text-gray-400 hover:text-red-500 p-1" data-id="${deck.id}" title="Delete">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mt-4 pt-3 border-t border-gray-100 dark:border-gray-700">
+                                            <span class="font-medium">${cardCount} card${cardCount === 1 ? '' : 's'}</span>
+                                            <span class="text-blue-600 dark:text-blue-400 hover:underline">Study &rarr;</span>
+                                        </div>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                        </div>`;
+                }
+
+                content.innerHTML = `
+                    <div class="space-y-6">
+                        <!-- Breadcrumb & Subject Toolbar -->
+                        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-gray-200 dark:border-gray-700">
+                            <div>
+                                <button id="back-to-subjects-btn" class="flex items-center text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline mb-1">
+                                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                                    All Subjects
+                                </button>
+                                <div class="flex items-center gap-3">
+                                    <h2 class="text-2xl font-bold text-gray-900 dark:text-white">${subjectName || 'General Decks'}</h2>
+                                    <span class="text-xs bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-semibold px-2.5 py-1 rounded-full">
+                                        ${subjectDecks.length} deck${subjectDecks.length === 1 ? '' : 's'} &bull; ${totalCards} cards
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <button id="study-all-subject-btn" class="px-3.5 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition flex items-center gap-1.5 shadow-sm" ${totalCards === 0 ? 'disabled' : ''}>
+                                    <span>⚡</span> Study All Units
+                                </button>
+                                <button id="quiz-all-subject-btn" class="px-3.5 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition flex items-center gap-1.5 shadow-sm" ${totalCards === 0 ? 'disabled' : ''}>
+                                    <span>🎯</span> AI Quiz
+                                </button>
+                                <button id="add-deck-to-subject-btn" class="px-3.5 py-2 text-sm font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-1.5 shadow-sm">
+                                    <span>+</span> Add Deck
+                                </button>
+                                ${subjectName ? `
+                                <button id="rename-subject-btn" class="px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition">
+                                    Rename
+                                </button>
+                                <button id="delete-subject-btn" class="px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 bg-white dark:bg-gray-800 border border-red-200 dark:border-red-900/40 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 transition">
+                                    Delete
+                                </button>
+                                ` : ''}
+                            </div>
                         </div>
+
+                        <!-- Decks Grid -->
+                        ${decksGridHTML}
                     </div>`;
-                document.getElementById('empty-add-deck-btn').addEventListener('click', () => renderAddDeckModal());
+
+                // Listeners for Subject View
+                document.getElementById('back-to-subjects-btn')?.addEventListener('click', () => {
+                    activeDeckSubject = null;
+                    renderDecksView(allUserDecks);
+                });
+                document.getElementById('add-deck-to-subject-btn')?.addEventListener('click', () => renderAddDeckModal(subjectName));
+                document.getElementById('subject-inner-add-btn')?.addEventListener('click', () => renderAddDeckModal(subjectName));
+                document.getElementById('rename-subject-btn')?.addEventListener('click', () => renderRenameSubjectFolderModal(subjectName));
+                document.getElementById('delete-subject-btn')?.addEventListener('click', () => deleteDeckSubject(subjectName));
+
+                // Study All Units
+                document.getElementById('study-all-subject-btn')?.addEventListener('click', () => {
+                    const combinedCards = subjectDecks.flatMap(d => d.cards || []);
+                    if (combinedCards.length === 0) return alert('This subject has no cards yet!');
+                    const combinedDeck = {
+                        id: `subject-${subjectName}`,
+                        topic: `${subjectName} (All Units)`,
+                        cards: combinedCards
+                    };
+                    renderQuizModal(combinedDeck);
+                });
+
+                // AI Quiz for Subject
+                document.getElementById('quiz-all-subject-btn')?.addEventListener('click', () => {
+                    const combinedCards = subjectDecks.flatMap(d => d.cards || []);
+                    if (combinedCards.length === 0) return alert('This subject has no cards yet!');
+                    const combinedDeck = {
+                        id: `subject-${subjectName}`,
+                        topic: `${subjectName} (All Units)`,
+                        cards: combinedCards
+                    };
+                    startAIGeneratedQuiz(combinedDeck);
+                });
+
+                setupDeckCardListeners();
                 return;
             }
 
-            content.innerHTML = `
-                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    ${decks.map(deck => {
-                        const style = getTopicStyle(deck.topic);
-                        const cardCount = deck.cards ? deck.cards.length : 0;
-                        const isPublic = deck.isPublic || false;
-                        return `
-                        <div class="deck-card bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden cursor-pointer transform hover:-translate-y-1 transition-transform duration-200" data-id="${deck.id}">
-                            <div class="p-4">
-                                <div class="flex items-center justify-between mb-3">
-                                    <div class="flex items-center space-x-2">
-                                        <div class="w-8 h-8 rounded-lg ${style.color} flex items-center justify-center text-lg">${style.icon}</div>
-                                        <h3 class="text-lg font-semibold text-gray-800 dark:text-white">${deck.topic}</h3>
+            // --- VIEW MODE 2: TOP LEVEL (SUBJECT FOLDERS OR ALL DECKS) ---
+            setHeader('My Decks');
+            const subjectsList = getAllDeckSubjects();
+            const unassignedDecks = decks.filter(d => !(d.subject || '').trim());
+
+            if (decks.length === 0 && subjectsList.length === 0) {
+                content.innerHTML = `
+                    <div class="text-center py-16">
+                        <div class="text-5xl mb-3">📚</div>
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">No decks or subjects yet</h3>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-sm mx-auto">Create a subject folder (like DSP or Calculus) and start adding unit decks into it.</p>
+                        <div class="mt-6 flex justify-center gap-3">
+                            <button id="empty-add-subject-btn" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 shadow-sm transition">
+                                📁 New Subject Folder
+                            </button>
+                            <button id="empty-add-deck-btn" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 shadow-sm transition">
+                                + New Deck
+                            </button>
+                        </div>
+                    </div>`;
+                document.getElementById('empty-add-subject-btn')?.addEventListener('click', renderCreateSubjectFolderModal);
+                document.getElementById('empty-add-deck-btn')?.addEventListener('click', () => renderAddDeckModal());
+                return;
+            }
+
+            // Top Toolbar: View Toggles + Action Buttons
+            const toolbarHTML = `
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-200 dark:border-gray-700">
+                    <!-- Toggle between Subject Folders and All Decks Grid -->
+                    <div class="inline-flex rounded-lg bg-gray-100 dark:bg-gray-700/60 p-1">
+                        <button id="view-mode-subjects-btn" class="px-3.5 py-1.5 text-xs font-semibold rounded-md transition ${deckViewMode === 'subjects' ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900'}">
+                            📁 Subjects (${subjectsList.length})
+                        </button>
+                        <button id="view-mode-all-btn" class="px-3.5 py-1.5 text-xs font-semibold rounded-md transition ${deckViewMode === 'all' ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900'}">
+                            🗂️ All Decks (${decks.length})
+                        </button>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex items-center gap-2">
+                        <button id="top-add-subject-btn" class="px-3.5 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition flex items-center gap-1.5 shadow-sm">
+                            <span>📁</span> New Subject
+                        </button>
+                        <button id="top-add-deck-btn" class="px-3.5 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition flex items-center gap-1.5 shadow-sm">
+                            <span>+</span> New Deck
+                        </button>
+                    </div>
+                </div>`;
+
+            let mainContentHTML = '';
+
+            if (deckViewMode === 'subjects') {
+                // SUBJECT FOLDERS VIEW
+                const subjectCardsHTML = subjectsList.map(subject => {
+                    const subDecks = decks.filter(d => (d.subject || '').trim() === subject);
+                    const cardCount = subDecks.reduce((sum, d) => sum + (d.cards ? d.cards.length : 0), 0);
+                    const unitPills = subDecks.slice(0, 4).map(d => 
+                        `<span class="text-[11px] bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-0.5 rounded font-medium truncate max-w-[120px]">${d.topic}</span>`
+                    ).join('');
+                    const moreCount = subDecks.length > 4 ? `<span class="text-[10px] text-gray-400 self-center">+${subDecks.length - 4} more</span>` : '';
+
+                    return `
+                        <div class="subject-folder-card bg-white dark:bg-gray-800 rounded-xl shadow-sm hover:shadow-md border border-gray-200 dark:border-gray-700 p-5 cursor-pointer transform hover:-translate-y-1 transition duration-200 flex flex-col justify-between" data-subject="${subject}">
+                            <div>
+                                <div class="flex items-start justify-between mb-3">
+                                    <div class="flex items-center space-x-3 min-w-0">
+                                        <div class="w-12 h-12 rounded-xl bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-2xl flex-shrink-0">
+                                            📁
+                                        </div>
+                                        <div class="min-w-0">
+                                            <h3 class="text-lg font-bold text-gray-900 dark:text-white truncate" title="${subject}">${subject}</h3>
+                                            <p class="text-xs text-gray-500 dark:text-gray-400">${subDecks.length} deck${subDecks.length === 1 ? '' : 's'} &bull; ${cardCount} cards</p>
+                                        </div>
                                     </div>
-                                    <div class="flex items-center">
-                                         <button class="publish-deck-btn text-gray-400 hover:text-green-500 mr-2" data-id="${deck.id}" data-is-public="${isPublic}">
-                                            ${isPublic ? 
-                                            `<svg class="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM4.332 8.027a6.012 6.012 0 011.912-2.706C6.512 5.72 7 7.92 7 9.5c0 .355.042.709.125 1.055a.8.8 0 01-.84 1.002A5.99 5.99 0 014.002 9.5c0-.99.22-1.93.62-2.775a.795.795 0 01.71-.498zM10 4a6 6 0 00-4.668 9.973.795.795 0 01-.71.498A8.01 8.01 0 012 9.5c0-1.02.213-2 .607-2.887a.8.8 0 011.09-.527A6.009 6.009 0 0110 4zm4.668 5.973a.795.795 0 01.71-.498A8.01 8.01 0 0118 9.5c0-1.02-.213-2-.607-2.887a.8.8 0 01-1.09-.527A6.009 6.009 0 0110 4a6 6 0 00-4.668 9.973.795.795 0 01-.71.498A5.99 5.99 0 0114.002 9.5c0-.99-.22-1.93-.62-2.775a.795.795 0 01.71-.498.8.8 0 01.84 1.002A6.012 6.012 0 0115.668 11.973z" clip-rule="evenodd" />_</svg>` : 
-                                            `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-3.333 0-6 2.667-6 4s2.667 4 6 4 6-2.667 6-4-2.667-4-6-4zm0 0V6m0 12v-2m-4-2H4m16 0h-2M6.343 6.343L5.636 5.636m12.728 12.728l-.707-.707M6.343 17.657l-.707.707m12.728-12.728l.707-.707"></path></svg>`}
+                                    <div class="flex items-center space-x-1" onclick="event.stopPropagation()">
+                                        <button class="rename-subject-btn text-gray-400 hover:text-blue-500 p-1" data-subject="${subject}" title="Rename Subject">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z"></path></svg>
                                         </button>
-                                        <button class="rename-deck-btn text-gray-400 hover:text-blue-500 mr-2" data-id="${deck.id}" data-topic="${deck.topic}">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z"></path></svg>
-                                        </button>
-                                        <button class="delete-deck-btn text-gray-400 hover:text-red-500" data-id="${deck.id}">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                        <button class="delete-subject-btn text-gray-400 hover:text-red-500 p-1" data-subject="${subject}" title="Delete Subject">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                                         </button>
                                     </div>
                                 </div>
-                                <p class="text-sm text-gray-500 dark:text-gray-400">${cardCount} cards</p>
+                            </div>
+                            <div class="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700/60 flex flex-wrap gap-1.5 items-center">
+                                ${unitPills || '<span class="text-xs text-gray-400 italic">No decks yet</span>'}
+                                ${moreCount}
                             </div>
                         </div>`;
-                    }).join('')}
+                }).join('');
+
+                let unassignedFolderHTML = '';
+                if (unassignedDecks.length > 0) {
+                    const unassignedPills = unassignedDecks.slice(0, 4).map(d => 
+                        `<span class="text-[11px] bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-0.5 rounded font-medium truncate max-w-[120px]">${d.topic}</span>`
+                    ).join('');
+                    unassignedFolderHTML = `
+                        <div class="subject-folder-card bg-gray-50 dark:bg-gray-800/60 rounded-xl shadow-sm hover:shadow-md border border-gray-200 dark:border-gray-700 p-5 cursor-pointer transform hover:-translate-y-1 transition duration-200 flex flex-col justify-between" data-subject="__GENERAL__">
+                            <div>
+                                <div class="flex items-start justify-between mb-3">
+                                    <div class="flex items-center space-x-3 min-w-0">
+                                        <div class="w-12 h-12 rounded-xl bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 flex items-center justify-center text-2xl flex-shrink-0">
+                                            🗂️
+                                        </div>
+                                        <div class="min-w-0">
+                                            <h3 class="text-lg font-bold text-gray-900 dark:text-white">General / Unassigned</h3>
+                                            <p class="text-xs text-gray-500 dark:text-gray-400">${unassignedDecks.length} deck${unassignedDecks.length === 1 ? '' : 's'}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700 flex flex-wrap gap-1.5 items-center">
+                                ${unassignedPills}
+                            </div>
+                        </div>`;
+                }
+
+                mainContentHTML = `
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                        ${subjectCardsHTML}
+                        ${unassignedFolderHTML}
+                    </div>`;
+            } else {
+                // ALL DECKS GRID VIEW
+                mainContentHTML = `
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                        ${decks.map(deck => {
+                            const style = getTopicStyle(deck.topic);
+                            const cardCount = deck.cards ? deck.cards.length : 0;
+                            const isPublic = deck.isPublic || false;
+                            const subjectBadge = (deck.subject || '').trim() 
+                                ? `<span class="text-[10px] bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 font-semibold px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800/50">📁 ${deck.subject}</span>` 
+                                : '';
+                            return `
+                            <div class="deck-card bg-white dark:bg-gray-800 rounded-xl shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 overflow-hidden cursor-pointer transform hover:-translate-y-1 transition duration-200" data-id="${deck.id}">
+                                <div class="p-5">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div class="flex items-center space-x-2.5 min-w-0">
+                                            <div class="w-9 h-9 rounded-lg ${style.color} flex items-center justify-center text-lg flex-shrink-0">${style.icon}</div>
+                                            <h3 class="text-base font-semibold text-gray-800 dark:text-white truncate" title="${deck.topic}">${deck.topic}</h3>
+                                        </div>
+                                        <div class="flex items-center space-x-1 flex-shrink-0">
+                                            <button class="rename-deck-btn text-gray-400 hover:text-blue-500 p-1" data-id="${deck.id}" data-topic="${deck.topic}" title="Rename / Change Subject">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z"></path></svg>
+                                            </button>
+                                            <button class="delete-deck-btn text-gray-400 hover:text-red-500 p-1" data-id="${deck.id}" title="Delete">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="my-2">${subjectBadge}</div>
+                                    <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                                        <span class="font-medium">${cardCount} card${cardCount === 1 ? '' : 's'}</span>
+                                        <span class="text-blue-600 dark:text-blue-400 hover:underline">Study &rarr;</span>
+                                    </div>
+                                </div>
+                            </div>`;
+                        }).join('')}
+                    </div>`;
+            }
+
+            content.innerHTML = `
+                <div class="space-y-6">
+                    ${toolbarHTML}
+                    ${mainContentHTML}
                 </div>`;
 
+            // Setup Listeners
+            document.getElementById('view-mode-subjects-btn')?.addEventListener('click', () => {
+                deckViewMode = 'subjects';
+                renderDecksView(allUserDecks);
+            });
+            document.getElementById('view-mode-all-btn')?.addEventListener('click', () => {
+                deckViewMode = 'all';
+                renderDecksView(allUserDecks);
+            });
+            document.getElementById('top-add-subject-btn')?.addEventListener('click', renderCreateSubjectFolderModal);
+            document.getElementById('top-add-deck-btn')?.addEventListener('click', () => renderAddDeckModal());
+
+            // Subject Folder click
+            document.querySelectorAll('.subject-folder-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    const sub = card.dataset.subject;
+                    activeDeckSubject = sub === '__GENERAL__' ? '' : sub;
+                    renderDecksView(allUserDecks);
+                });
+            });
+
+            // Subject folder Rename / Delete
+            document.querySelectorAll('.rename-subject-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    renderRenameSubjectFolderModal(btn.dataset.subject);
+                });
+            });
+            document.querySelectorAll('.delete-subject-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    deleteDeckSubject(btn.dataset.subject);
+                });
+            });
+
+            setupDeckCardListeners();
+        }
+
+        function setupDeckCardListeners() {
             document.querySelectorAll('.deck-card').forEach(card => card.addEventListener('click', (e) => {
                 if (!e.target.closest('.delete-deck-btn') && !e.target.closest('.rename-deck-btn') && !e.target.closest('.publish-deck-btn')) {
                     viewDeck(card.dataset.id);
@@ -1156,7 +1648,7 @@
                 e.stopPropagation();
                 renderRenameDeckModal(btn.dataset.id, btn.dataset.topic);
             }));
-             document.querySelectorAll('.publish-deck-btn').forEach(btn => btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.publish-deck-btn').forEach(btn => btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const isPublic = btn.dataset.isPublic === 'true';
                 if (isPublic) {
@@ -2417,21 +2909,35 @@ async function createUserProfile(user, username) {
             }
         }
 
-        async function createDeck(topic) {
+        async function createDeck(topic, subject = '') {
             try {
+                const cleanSubject = (subject || '').trim();
                 const decksCol = collection(db, `/artifacts/${appId}/users/${userId}/decks`);
-                await addDoc(decksCol, { topic, cards: [], isPublic: false });
+                await addDoc(decksCol, {
+                    topic: topic.trim(),
+                    subject: cleanSubject,
+                    cards: [],
+                    isPublic: false,
+                    createdAt: Date.now()
+                });
+                if (cleanSubject) {
+                    await saveDeckSubject(cleanSubject);
+                }
             } catch (error) {
                 console.error("Error creating deck:", error);
             }
         }
         
-        async function updateDeckTopic(deckId, newTopic) {
+        async function updateDeckTopic(deckId, newTopic, newSubject = undefined) {
             try {
                 const deckRef = doc(db, `/artifacts/${appId}/users/${userId}/decks`, deckId);
-                await updateDoc(deckRef, {
-                    topic: newTopic
-                });
+                const updateData = { topic: newTopic.trim() };
+                if (newSubject !== undefined) {
+                    const cleanSub = (newSubject || '').trim();
+                    updateData.subject = cleanSub;
+                    if (cleanSub) await saveDeckSubject(cleanSub);
+                }
+                await updateDoc(deckRef, updateData);
             } catch (error) {
                 console.error("Error renaming deck:", error);
             }
@@ -3410,8 +3916,21 @@ async function fileToGenerativePart(file) {
                 allUserDecks = decks;
                 renderLibrary(decks);
                 const mainHeader = document.querySelector('#main-header h1');
-                if (mainHeader && mainHeader.textContent === 'My Decks') {
+                if (mainHeader && (mainHeader.textContent === 'My Decks' || mainHeader.textContent.startsWith('📁 '))) {
                     renderDecksView(decks);
+                }
+            });
+        }
+
+        function fetchDeckSubjects() {
+            if (!userId) return;
+            const subjectsCol = collection(db, `/artifacts/${appId}/users/${userId}/deck_subjects`);
+            onSnapshot(subjectsCol, (snapshot) => {
+                allDeckSubjects = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderLibrary(allUserDecks);
+                const mainHeader = document.querySelector('#main-header h1');
+                if (mainHeader && (mainHeader.textContent === 'My Decks' || mainHeader.textContent.startsWith('📁 '))) {
+                    renderDecksView(allUserDecks);
                 }
             });
         }
@@ -3463,6 +3982,7 @@ function setupEventListeners() {
     // Sidebar listeners
     document.getElementById('nav-my-decks').addEventListener('click', (e) => {
         e.preventDefault();
+        activeDeckSubject = null;
         renderDecksView(allUserDecks);
     });
     document.getElementById('nav-progress').addEventListener('click', (e) => {
@@ -3485,10 +4005,10 @@ function setupEventListeners() {
 
     document.getElementById('sidebar-add-deck-btn').addEventListener('click', (e) => {
         e.preventDefault();
-        renderAddDeckModal();
+        renderAddDeckModal(activeDeckSubject);
     });
 
-    document.getElementById('library-add-btn').addEventListener('click', renderAddDeckModal);
+    document.getElementById('library-add-btn').addEventListener('click', () => renderAddDeckModal(activeDeckSubject));
 
     document.getElementById('library-list').addEventListener('click', (e) => {
         const target = e.target.closest('a');
@@ -3589,6 +4109,7 @@ function initializeAndApplyTheme() {
                 userId = user.uid;
                 fetchUserProfile();
                 fetchAndDisplayDecks();
+                fetchDeckSubjects();
                 fetchProgressSubjects();
                 listenForFollowRequests();
                 renderAppLayout(); // This will now handle the theme initialization
@@ -4155,7 +4676,11 @@ function renderQuizModal(deck) { // Renamed from renderStudySessionView for clar
 
         // --- Event listeners remain largely the same, but add one for the new back button ---
          document.getElementById('study-back-btn').addEventListener('click', () => {
-             renderSingleDeckView(deck.id); // Go back to the specific deck
+             if (deck.id.startsWith('subject-')) {
+                 renderDecksView(allUserDecks);
+             } else {
+                 renderSingleDeckView(deck.id);
+             }
          });
 
         renderMath(document.getElementById('quiz-card'));
