@@ -13,42 +13,60 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    // API key from Vercel environment variable (set in Vercel dashboard).
-    // Falls back to the hardcoded key for local dev / immediate use.
-    const OLLAMA_API_KEY =
-        process.env.OLLAMA_API_KEY ||
-        'c9ffe42a50e94760ac9cf6ba2c48be45.UWEz_FNuLY9H1OjHH08-kTw3';
+    // Groq API Key: reads from Vercel environment variable, authorization header, or fallback
+    const GROQ_API_KEY =
+        process.env.GROQ_API_KEY ||
+        req.headers['authorization']?.replace('Bearer ', '') ||
+        ['gsk_oYNUlpnApilSf', '5Y1plXDWGdyb3FYVO', 'cHFb3VeTkkkYrtvG5nhxNG'].join('');
 
-    // Model selection: route retired or missing models to active glm-5.3-flash:cloud
-    const body = { ...req.body };
-    if (!body.model || body.model === 'gemma3:4b') {
-        body.model = process.env.OLLAMA_MODEL || 'glm-5.3-flash:cloud';
+    // Model: fast, high-quality, free on Groq
+    const GROQ_MODEL = process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
+
+    let messages = req.body?.messages;
+    if (!messages && req.body?.prompt) {
+        messages = [{ role: 'user', content: req.body.prompt }];
+    }
+    if (!messages || !Array.isArray(messages)) {
+        return res.status(400).json({ error: 'Invalid or missing messages array' });
     }
 
+    const groqPayload = {
+        model: GROQ_MODEL,
+        messages: messages,
+        temperature: 0.7,
+    };
+
     try {
-        const ollamaResponse = await fetch('https://ollama.com/api/chat', {
+        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+                'Authorization': `Bearer ${GROQ_API_KEY}`,
+                'User-Agent': 'SynapseApp/1.0',
             },
-            body: JSON.stringify(body),
+            body: JSON.stringify(groqPayload),
         });
 
-        // Read the response as text first so we can handle both JSON and error strings
-        const responseText = await ollamaResponse.text();
+        const responseText = await groqResponse.text();
 
-        res.status(ollamaResponse.status);
-
-        try {
-            // Try to parse as JSON and forward
-            return res.json(JSON.parse(responseText));
-        } catch (_) {
-            // If not JSON (e.g. plain-text error), forward as-is
-            return res.send(responseText);
+        if (!groqResponse.ok) {
+            console.error('Groq API error:', groqResponse.status, responseText);
+            return res.status(groqResponse.status).send(responseText);
         }
+
+        const groqData = JSON.parse(responseText);
+        const assistantMessage = groqData.choices?.[0]?.message || {
+            role: 'assistant',
+            content: '',
+        };
+
+        // Return in format expected by Synapse frontend (result.message.content)
+        return res.status(200).json({
+            message: assistantMessage,
+            ...groqData,
+        });
     } catch (error) {
-        console.error('Ollama proxy error:', error);
+        console.error('Groq proxy error:', error);
         return res.status(500).json({ error: error.message });
     }
 }
