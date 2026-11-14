@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     // Falls back to the hardcoded key for local dev / immediate use.
     const OLLAMA_API_KEY =
         process.env.OLLAMA_API_KEY ||
-        '8731c2c39c9d420a91af5467a3123d27.NPG3RQENRKZzKl2lmDIeCl1j';
+        'c9ffe42a50e94760ac9cf6ba2c48be45.UWEz_FNuLY9H1OjHH08-kTw3';
 
     try {
         const ollamaResponse = await fetch('https://ollama.com/api/chat', {
