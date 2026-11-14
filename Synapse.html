@@ -439,6 +439,8 @@
                     selectedDeckIds.forEach(id => {
                         const ref = doc(db, `/artifacts/${appId}/users/${userId}/decks`, id);
                         batch.update(ref, { subject: targetSubject });
+                        const d = allUserDecks.find(deck => deck.id === id);
+                        if (d) d.subject = targetSubject;
                     });
                     await batch.commit();
 
@@ -3045,7 +3047,19 @@ async function createUserProfile(user, username) {
                     updateData.subject = cleanSub;
                     if (cleanSub) await saveDeckSubject(cleanSub);
                 }
+                const targetDeck = allUserDecks.find(d => d.id === deckId);
+                if (targetDeck) {
+                    targetDeck.topic = updateData.topic;
+                    if (newSubject !== undefined) targetDeck.subject = updateData.subject;
+                }
                 await updateDoc(deckRef, updateData);
+                // Dynamically update single deck view if active
+                const titleEl = document.getElementById('deck-view-topic');
+                if (titleEl) titleEl.textContent = updateData.topic;
+                const subjBtnText = document.querySelector('#change-deck-subject-btn span:nth-child(2)');
+                if (subjBtnText) subjBtnText.textContent = updateData.subject || 'Assign Subject';
+                const backBtn = document.getElementById('back-to-decks');
+                if (backBtn) backBtn.innerHTML = `<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>${updateData.subject ? `Back to 📁 ${updateData.subject}` : 'Back to My Decks'}`;
             } catch (error) {
                 console.error("Error renaming deck:", error);
             }
