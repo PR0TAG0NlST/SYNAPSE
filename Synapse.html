@@ -366,6 +366,9 @@
                     activeDeckSubject = name;
                     renderDecksView(allUserDecks);
                     document.getElementById('create-subject-folder-modal')?.remove();
+                    if (allUserDecks.length > 0) {
+                        setTimeout(() => renderMoveDecksToSubjectModal(name), 200);
+                    }
                 }
             }, 'Create Subject');
         }
@@ -386,6 +389,79 @@
                 }
             }, 'Save');
         }
+
+        // Modal to move multiple existing decks into a subject folder
+        function renderMoveDecksToSubjectModal(targetSubject) {
+            const otherDecks = allUserDecks.filter(d => (d.subject || '').trim() !== targetSubject);
+
+            if (otherDecks.length === 0) {
+                alert(`All your decks are already in "${targetSubject}", or you don't have any other decks to move.`);
+                return;
+            }
+
+            const deckCheckboxes = otherDecks.map(deck => {
+                const currentSub = (deck.subject || '').trim();
+                const subLabel = currentSub ? `(currently in 📁 ${currentSub})` : `(currently unassigned / General)`;
+                return `
+                    <label class="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition">
+                        <div class="flex items-center space-x-3 min-w-0">
+                            <input type="checkbox" class="move-deck-checkbox h-4 w-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500" data-deck-id="${deck.id}">
+                            <div class="min-w-0">
+                                <span class="text-sm font-semibold text-gray-900 dark:text-white truncate block">${deck.topic}</span>
+                                <span class="text-xs text-gray-500 dark:text-gray-400">${deck.cards ? deck.cards.length : 0} cards &bull; ${subLabel}</span>
+                            </div>
+                        </div>
+                    </label>
+                `;
+            }).join('');
+
+            renderModal('move-decks-modal', `Move Decks into 📁 ${targetSubject}`, `
+                <div class="space-y-4">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Select which decks to move into <strong>${targetSubject}</strong>:</p>
+                    <div class="flex justify-between items-center text-xs">
+                        <button type="button" id="select-all-move-btn" class="text-indigo-600 dark:text-indigo-400 hover:underline font-medium">Select All</button>
+                        <button type="button" id="deselect-all-move-btn" class="text-gray-500 hover:underline font-medium">Deselect All</button>
+                    </div>
+                    <div class="space-y-2 max-h-72 overflow-y-auto pr-1">
+                        ${deckCheckboxes}
+                    </div>
+                </div>`,
+            async () => {
+                const checkboxes = document.querySelectorAll('.move-deck-checkbox:checked');
+                const selectedDeckIds = Array.from(checkboxes).map(cb => cb.dataset.deckId);
+                if (selectedDeckIds.length === 0) {
+                    document.getElementById('move-decks-modal')?.remove();
+                    return;
+                }
+
+                try {
+                    const batch = writeBatch(db);
+                    selectedDeckIds.forEach(id => {
+                        const ref = doc(db, `/artifacts/${appId}/users/${userId}/decks`, id);
+                        batch.update(ref, { subject: targetSubject });
+                    });
+                    await batch.commit();
+
+                    await saveDeckSubject(targetSubject);
+
+                    document.getElementById('move-decks-modal')?.remove();
+                    activeDeckSubject = targetSubject;
+                    renderDecksView(allUserDecks);
+                } catch (e) {
+                    console.error("Error moving decks:", e);
+                    alert("Failed to move decks: " + e.message);
+                }
+            }, 'Move Selected Decks');
+
+            document.getElementById('select-all-move-btn')?.addEventListener('click', () => {
+                document.querySelectorAll('.move-deck-checkbox').forEach(cb => cb.checked = true);
+            });
+            document.getElementById('deselect-all-move-btn')?.addEventListener('click', () => {
+                document.querySelectorAll('.move-deck-checkbox').forEach(cb => cb.checked = false);
+            });
+        }
+
+
 
         function renderAddDeckModal(defaultSubject = null) {
             const subjects = getAllDeckSubjects();
@@ -1312,9 +1388,14 @@
                             <div class="text-4xl mb-3">📁</div>
                             <h3 class="text-lg font-semibold text-gray-900 dark:text-white">No decks in "${subjectName}" yet</h3>
                             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-sm mx-auto">Add unit decks to this subject (e.g. Unit 1, Unit 2, Unit 3).</p>
-                            <button id="subject-inner-add-btn" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 shadow-sm transition">
-                                + Add First Deck
-                            </button>
+                            <div class="mt-5 flex flex-wrap justify-center gap-3">
+                                <button id="subject-inner-move-btn" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 shadow-sm transition flex items-center gap-1.5">
+                                    <span>📥</span> Move Existing Decks into "${subjectName}"
+                                </button>
+                                <button id="subject-inner-add-btn" class="px-4 py-2 bg-white dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-semibold hover:bg-gray-50 dark:hover:bg-gray-600 shadow-sm transition">
+                                    + Create New Deck
+                                </button>
+                            </div>
                         </div>`;
                 } else {
                     decksGridHTML = `
@@ -1373,6 +1454,9 @@
                                 <button id="quiz-all-subject-btn" class="px-3.5 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition flex items-center gap-1.5 shadow-sm" ${totalCards === 0 ? 'disabled' : ''}>
                                     <span>🎯</span> AI Quiz
                                 </button>
+                                <button id="move-decks-to-subject-btn" class="px-3.5 py-2 text-sm font-semibold rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition flex items-center gap-1.5 shadow-sm">
+                                    <span>📥</span> Move Decks Here
+                                </button>
                                 <button id="add-deck-to-subject-btn" class="px-3.5 py-2 text-sm font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-1.5 shadow-sm">
                                     <span>+</span> Add Deck
                                 </button>
@@ -1396,6 +1480,8 @@
                     activeDeckSubject = null;
                     renderDecksView(allUserDecks);
                 });
+                document.getElementById('move-decks-to-subject-btn')?.addEventListener('click', () => renderMoveDecksToSubjectModal(subjectName));
+                document.getElementById('subject-inner-move-btn')?.addEventListener('click', () => renderMoveDecksToSubjectModal(subjectName));
                 document.getElementById('add-deck-to-subject-btn')?.addEventListener('click', () => renderAddDeckModal(subjectName));
                 document.getElementById('subject-inner-add-btn')?.addEventListener('click', () => renderAddDeckModal(subjectName));
                 document.getElementById('rename-subject-btn')?.addEventListener('click', () => renderRenameSubjectFolderModal(subjectName));
@@ -1504,6 +1590,9 @@
                                         </div>
                                     </div>
                                     <div class="flex items-center space-x-1" onclick="event.stopPropagation()">
+                                        <button class="move-into-subject-btn text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 p-1" data-subject="${subject}" title="Move existing decks into ${subject}">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                                        </button>
                                         <button class="rename-subject-btn text-gray-400 hover:text-blue-500 p-1" data-subject="${subject}" title="Rename Subject">
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z"></path></svg>
                                         </button>
@@ -1617,7 +1706,13 @@
                 });
             });
 
-            // Subject folder Rename / Delete
+            // Subject folder Move Decks / Rename / Delete
+            document.querySelectorAll('.move-into-subject-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    renderMoveDecksToSubjectModal(btn.dataset.subject);
+                });
+            });
             document.querySelectorAll('.rename-subject-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -1675,12 +1770,17 @@ async function renderSingleDeckView(deckId) {
         const content = document.getElementById('app-content');
         content.innerHTML = `
             <div class="flex flex-col space-y-4">
-               <div class="flex items-center justify-between">
-                   <button id="back-to-decks" class="flex items-center text-sm text-blue-600 hover:underline">
+               <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                   <button id="back-to-decks" class="flex items-center text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline">
                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
-                       Back to My Decks
+                       ${deck.subject ? `Back to 📁 ${deck.subject}` : 'Back to My Decks'}
                    </button>
-                   <div class="flex space-x-2">
+                   <div class="flex flex-wrap items-center gap-2">
+                       <button id="change-deck-subject-btn" class="px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition flex items-center gap-1.5 shadow-sm" title="Move or rename this deck">
+                           <span>📁</span>
+                           <span>${deck.subject ? deck.subject : 'Assign Subject'}</span>
+                           <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                       </button>
                        <button id="add-card-btn" class="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700">Add Card</button>
                        <button id="start-study-btn" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700" ${cards.length === 0 ? 'disabled' : ''}>Study</button>
                        <button id="start-quiz-btn" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700" ${cards.length === 0 ? 'disabled' : ''}>AI Quiz</button>
@@ -1709,7 +1809,15 @@ async function renderSingleDeckView(deckId) {
             </div>`;
 
         renderMath(document.getElementById('card-list'));
-        document.getElementById('back-to-decks').addEventListener('click', () => renderDecksView(allUserDecks));
+        document.getElementById('back-to-decks').addEventListener('click', () => {
+            if (deck.subject) {
+                activeDeckSubject = deck.subject;
+            }
+            renderDecksView(allUserDecks);
+        });
+        document.getElementById('change-deck-subject-btn')?.addEventListener('click', () => {
+            renderRenameDeckModal(deck.id, deck.topic);
+        });
         document.getElementById('add-card-btn').addEventListener('click', () => renderAddCardModal(deckId));
         
         // Add listeners for BOTH buttons
