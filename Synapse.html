@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Synapse</title>
     <link rel="icon" type="image/png" href="/favicon.png"> <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
 </head>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
@@ -48,7 +51,12 @@
         .card-face-back {
             transform: rotateY(180deg);
         }
-         .loader {
+         .katex-display {
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding: 4px 0;
+        }
+        .loader {
             border: 4px solid #f3f3f3; /* Light grey */
             border-top: 4px solid #3498db; /* Blue */
             border-radius: 50%;
@@ -109,6 +117,28 @@
         let chatHistory = [];
 
         startApp(firebaseConfig);
+
+        // Universal KaTeX Math Renderer helper
+        function renderMath(element = document.body) {
+            if (!element) return;
+            try {
+                if (typeof renderMathInElement === 'function') {
+                    renderMathInElement(element, {
+                        delimiters: [
+                            { left: '$$', right: '$$', display: true },
+                            { left: '$', right: '$', display: false },
+                            { left: '\\(', right: '\\)', display: false },
+                            { left: '\\[', right: '\\]', display: true }
+                        ],
+                        throwOnError: false,
+                        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+                    });
+                }
+            } catch (err) {
+                console.warn('Math rendering error:', err);
+            }
+        }
+
 
 
         // --- FUNCTION DECLARATIONS (ORDERED TO PREVENT REFERENCE ERRORS) ---
@@ -1186,6 +1216,7 @@ async function renderSingleDeckView(deckId) {
                 </div>
             </div>`;
 
+        renderMath(document.getElementById('card-list'));
         document.getElementById('back-to-decks').addEventListener('click', () => renderDecksView(allUserDecks));
         document.getElementById('add-card-btn').addEventListener('click', () => renderAddCardModal(deckId));
         
@@ -1473,6 +1504,7 @@ async function renderQuizResultsView(score, totalQuestions, deck, userAnswers) {
         </div>
     `;
 
+    renderMath(content);
     document.getElementById('quiz-again-btn').addEventListener('click', () => startAIGeneratedQuiz(deck));
     document.getElementById('quiz-decks-btn').addEventListener('click', () => renderDecksView(allUserDecks));
 }
@@ -1939,6 +1971,7 @@ Concise Options: Make all answer options (both correct and incorrect) as concise
 Answer Length: Avoid making the correct answer consistently the longest option. The correct answer should often be shorter than or roughly equal in length to the incorrect options (distractors).
 Randomized Position: The correct answer MUST appear in a different position (index 0, 1, 2, or 3) for EACH question. Never put the correct answer in the same slot for consecutive questions.
 JSON Output: The response MUST be a valid JSON array of objects. Each object must have keys "question", "options" (an array of 4 strings), and "correctAnswer" (a string matching one of the options). Do NOT include explanations or markdown.
+Math & Science: Format all mathematical formulas and equations using standard LaTeX enclosed in $ for inline equations (e.g. $E=mc^2$) or $$ for block equations.
 
 
                 Here is an example of the required format:
@@ -2033,6 +2066,8 @@ JSON Output: The response MUST be a valid JSON array of objects. Each object mus
                         </div>
                     </div>
                 `;
+
+                renderMath(content);
 
                 function handleAnswer(selectedAnswer) {
                     const isCorrect = selectedAnswer === q.correctAnswer;
@@ -2500,6 +2535,7 @@ async function createUserProfile(user, username) {
                 messageEl.className = 'flex justify-end';
                 messageEl.innerHTML = `<div class="bg-blue-500 text-white p-3 rounded-lg max-w-xs">${message}</div>`;
                 chatMessages.appendChild(messageEl);
+                renderMath(messageEl);
                 chatMessages.scrollTop = chatMessages.scrollHeight;
             }
             chatHistory.push({ role: 'user', parts: [{ text: message }] });
@@ -2517,6 +2553,7 @@ async function createUserProfile(user, username) {
                 messageEl.className = 'flex justify-start';
                 messageEl.innerHTML = `<div class="bg-gray-200 dark:bg-gray-600 p-3 rounded-lg max-w-xs text-sm text-gray-900 dark:text-white">${formattedMessage}</div>`;
                 chatMessages.appendChild(messageEl);
+                renderMath(messageEl);
                 chatMessages.scrollTop = chatMessages.scrollHeight;
             }
             chatHistory.push({ role: 'model', parts: [{ text: message }] });
@@ -2549,7 +2586,7 @@ async function createUserProfile(user, username) {
                 const apiUrl = `/api/chat`;
 
                 // Convert Gemini-style chatHistory to OpenAI-style messages
-                const systemMessage = { role: 'system', content: "You are an expert AI tutor. Your role is to provide clear, concise, and professional explanations. When a user asks for an explanation, break down the concept into its core components. Always be accurate, helpful and friendly. Always try to keep the answers short to be like 50 words. The goal is to make learning feel like a quick chat with a friend." };
+                const systemMessage = { role: 'system', content: "You are an expert AI tutor. Your role is to provide clear, concise, and professional explanations. When a user asks for an explanation, break down the concept into its core components. Always be accurate, helpful and friendly. Always try to keep the answers short to be like 50 words. The goal is to make learning feel like a quick chat with a friend. Format any mathematical equations or scientific notations using standard LaTeX enclosed in $ for inline math (e.g. $x^2$, $\frac{a}{b}$) or $$ for block equations." };
                 const messages = [systemMessage, ...chatHistory.map(m => ({ role: m.role === 'model' ? 'assistant' : m.role, content: m.parts[0].text }))];
 
                 const response = await fetch(apiUrl, {
@@ -2603,6 +2640,7 @@ async function createUserProfile(user, username) {
                 The response MUST be a valid JSON array of objects, where each object has a "question" and an "answer" key.
                 Do NOT include any other text, explanations, or markdown formatting.
                 The questions should be clear and concise. The answers should be accurate and to the point.
+                MATH & SCIENCE NOTATION: When content involves mathematical, scientific, or technical formulas, always format them using standard LaTeX enclosed in $ for inline equations (e.g. $E=mc^2$, $\frac{a}{b}$, $\sqrt{x}$, $x^2$) or $$ for block equations ($$...$$).
                 Topic/Notes:
                 ---
                 ${text}
@@ -2726,6 +2764,7 @@ async function fileToGenerativePart(file) {
                 The response MUST be a valid JSON array of objects, where each object has a "question" and an "answer" key.
                 Do NOT include any other text, explanations, or markdown formatting.
                 The questions should be clear and concise. The answers should be accurate and to the point.
+                MATH & SCIENCE NOTATION: When content involves mathematical, scientific, or technical formulas, always format them using standard LaTeX enclosed in $ for inline equations (e.g. $E=mc^2$) or $$ for block equations.
             `;
 
             try {
@@ -3162,7 +3201,8 @@ async function fileToGenerativePart(file) {
                         </div>
                     </div>`;
 
-                document.getElementById('back-to-public-decks').addEventListener('click', renderPublicDecksView);
+                renderMath(content);
+        document.getElementById('back-to-public-decks').addEventListener('click', renderPublicDecksView);
                 document.getElementById('start-quiz-btn').addEventListener('click', () => renderQuizModal(deck));
                 
                 if (isOwner) {
@@ -4118,11 +4158,13 @@ function renderQuizModal(deck) { // Renamed from renderStudySessionView for clar
              renderSingleDeckView(deck.id); // Go back to the specific deck
          });
 
+        renderMath(document.getElementById('quiz-card'));
         const cardElement = document.getElementById('quiz-card');
         const explainContainer = document.getElementById('explain-btn-container');
 
         function flipCard() {
             cardElement.classList.toggle('is-flipped');
+            renderMath(cardElement);
              if (cardElement.classList.contains('is-flipped')) {
                 explainContainer.innerHTML = `
                     <button id="explain-card-btn" class="px-4 py-2 text-sm rounded-lg bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 flex items-center">
